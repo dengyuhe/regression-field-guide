@@ -224,13 +224,7 @@ plt.show()</pre></div>
   <div class="code"><pre>plt.scatter(res.fittedvalues, resid, s=5); plt.axhline(0, color='r'); plt.show()
 sm.qqplot(resid, line='s'); plt.show()
 print(resid.skew(), resid.kurt())   # kurt() is excess kurtosis: 0 = normal</pre></div>
-
-  <h3>Marginal effects with squares and interactions</h3>
-  <div class="code"><pre>b = final.params
-print('X2 minimum at:', -b['X2'] / (2 * b['X2_sq']))
-print('Effect of X3 at mean X1:', b['X3'] + b['X1_X3'] * X['X1'].mean())
-print('Effect of X3 is zero at X1 =', -b['X3'] / b['X1_X3'])</pre></div>
-  <p>With Y = … + b₃X₃ + b₁₃X₁X₃, the effect of X₃ is b₃ + b₁₃X₁: it depends on the level of X₁. With b₂X₂ + b₂₂X₂², the turning point is at −b₂ / (2b₂₂).</p>
+  <p>Patterns found here become the candidate features tested in section 04.</p>
 </section>
 
 <!-- 03 -->
@@ -250,9 +244,9 @@ print('baseline:', cv_rmse(X))</pre></div>
   <p>5-fold CV trains on four fifths and scores on the last fifth, rotating so every row is scored once. It uses all the data and has less noise than one 80/20 split. Keep the same <code>kf</code> for every comparison so the folds match.</p>
 
   <h3>Overfitting check</h3>
-  <div class="code"><pre>print('train RMSE:', np.sqrt((final.resid ** 2).mean()))
-print('CV RMSE:   ', cv_rmse(X_final))</pre></div>
-  <p>Nearly equal: no overfitting. CV much worse than train: the model is fitting noise.</p>
+  <div class="code"><pre>print('train RMSE:', np.sqrt((res.resid ** 2).mean()))   # res = baseline OLS from section 02
+print('CV RMSE:   ', cv_rmse(X))</pre></div>
+  <p>Nearly equal: no overfitting. CV much worse than train: the model is fitting noise. Repeat this check on the final model in section 05.</p>
 
   <h3>Variants</h3>
   <div class="tbl"><table>
@@ -287,33 +281,43 @@ for a, b in combinations(X.columns, 2):
     X_try[a + '_' + b] = X[a] * X[b]
     print(a, b, round(cv_rmse(X_try), 3))</pre></div>
 
-  <h3>Select: three-way interactions (to justify stopping)</h3>
-  <div class="code"><pre>for a, b, c in combinations(X.columns, 3):
-    X_try = X_new.copy()
-    X_try[a + '_' + b + '_' + c] = X[a] * X[b] * X[c]
-    print(a, b, c, round(cv_rmse(X_try), 3))</pre></div>
-
   <h3>Other transforms worth one line each</h3>
-  <div class="code"><pre>X_try['X1_log']  = np.log(X['X1'] - X['X1'].min() + 1)  # log needs positive values
+  <div class="code"><pre>X_try = X.copy()
+X_try['X1_log']  = np.log(X['X1'] - X['X1'].min() + 1)  # log needs positive values
 X_try['X2_abs']  = (X['X2'] - 5).abs()                   # V-shape around a point
-X_try['X1_high'] = (X['X1'] > 6).astype(int)             # threshold / step</pre></div>
+X_try['X1_high'] = (X['X1'] > 6).astype(int)             # threshold / step
+print(round(cv_rmse(X_try), 3))</pre></div>
 
   <h3>Add: one function used for train and test</h3>
   <div class="code"><pre>def add_features(data):
     data = data.copy()                 # never modify the original table
     data['X2_sq'] = data['X2'] ** 2
     data['X1_X3'] = data['X1'] * data['X3']
+    return data
+
+X_new = add_features(X)
+print('with new features:', cv_rmse(X_new))</pre></div>
+  <div class="note warn"><p><b>Without <code>.copy()</code></b> the function adds columns to <code>X</code> itself, so every later "baseline" comparison silently runs on engineered features. Restart and run all after changing it.</p></div>
+
+  <h3>Deciding to drop a variable</h3>
+  <div class="code"><pre>print('with X4:   ', cv_rmse(X_new))
+print('without X4:', cv_rmse(X_new.drop(columns='X4')))</pre></div>
+  <p>If CV error is unchanged and the coefficient is insignificant, drop it for a simpler, more stable model. Add the drop to the function, so train and test stay consistent:</p>
+  <div class="code"><pre>def add_features(data):
+    data = data.copy()
+    data['X2_sq'] = data['X2'] ** 2
+    data['X1_X3'] = data['X1'] * data['X3']
     data = data.drop(columns='X4')     # redundant with X1
     return data
 
 X_final = add_features(X)</pre></div>
-  <div class="note warn"><p><b>Without <code>.copy()</code></b> the function adds columns to <code>X</code> itself, so every later "baseline" comparison silently runs on engineered features. Restart and run all after changing it.</p></div>
 
-  <h3>Deciding to drop a variable</h3>
-  <div class="code"><pre>X_with = X_final.join(X['X4'])                 # add X4 back for the comparison
-print('with X4:   ', cv_rmse(X_with))
-print('without X4:', cv_rmse(X_final))</pre></div>
-  <p>If CV error is unchanged and the coefficient is insignificant, drop it for a simpler, more stable model.</p>
+  <h3>Check: three-way interactions (to justify stopping)</h3>
+  <div class="code"><pre>for a, b, c in combinations(X.columns, 3):
+    X_try = X_final.copy()
+    X_try[a + '_' + b + '_' + c] = X[a] * X[b] * X[c]
+    print(a, b, c, round(cv_rmse(X_try), 3))</pre></div>
+  <p>If no line improves meaningfully on <code>cv_rmse(X_final)</code>, stop at two-way terms.</p>
 
   <h3>Why stop at two-way interactions</h3>
   <ul class="tight">
@@ -356,7 +360,30 @@ print(pd.Series(lasso[-1].coef_, index=X_final.columns))</pre></div>
   <h3>Final model</h3>
   <div class="code"><pre>final = sm.OLS(y, sm.add_constant(X_final)).fit(cov_type='HC3')
 final.summary()</pre></div>
-  <p>Refit on the full training set, rerun the residual plots, and write the interpretation from marginal effects.</p>
+  <p>Refit on the full training set. Then check it and interpret it with the blocks below.</p>
+
+  <h3>Residuals of the final model</h3>
+  <div class="code"><pre>resid = final.resid
+plt.figure(figsize=(12, 8))
+for i, f in enumerate(X, 1):
+    plt.subplot(2, 2, i)
+    plt.scatter(df[f], resid, s=5)
+    plt.axhline(0, color='r')
+    plt.title(f"Final residuals vs. {f}")
+plt.tight_layout()
+plt.show()</pre></div>
+  <p>Flat plots against every original predictor mean the specification captures the structure.</p>
+
+  <h3>Overfitting check on the final model</h3>
+  <div class="code"><pre>print('train RMSE:', np.sqrt((final.resid ** 2).mean()))
+print('CV RMSE:   ', cv_rmse(X_final))</pre></div>
+
+  <h3>Marginal effects with squares and interactions</h3>
+  <div class="code"><pre>b = final.params
+print('X2 minimum at:', -b['X2'] / (2 * b['X2_sq']))
+print('Effect of X3 at mean X1:', b['X3'] + b['X1_X3'] * X['X1'].mean())
+print('Effect of X3 is zero at X1 =', -b['X3'] / b['X1_X3'])</pre></div>
+  <p>With Y = … + b₃X₃ + b₁₃X₁X₃, the effect of X₃ is b₃ + b₁₃X₁: it depends on the level of X₁. With b₂X₂ + b₂₂X₂², the turning point is at −b₂ / (2b₂₂).</p>
 </section>
 
 <!-- 06 -->
